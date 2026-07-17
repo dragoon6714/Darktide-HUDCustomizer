@@ -50,4 +50,7 @@ return {
     notify_hud_reset = {
         en = "HUD Customizer: all elements reset to defaults.",
     },
+    notify_hud_hidden = {
+        en = "HUD Customizer: HUD hidden — press the keybind again to restore.",
+    },
 }

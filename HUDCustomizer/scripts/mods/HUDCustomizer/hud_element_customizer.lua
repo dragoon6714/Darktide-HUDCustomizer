@@ -1,13 +1,15 @@
 -- HudElementCustomizer — the in-game HUD editor.
 --
 -- A HudElementBase subclass injected into every UIHud (see HUDCustomizer.lua).
--- On its first update() it enumerates every top-level scenegraph node of every
--- HUD element (mission/hub elements via the parent UIHud's visibility groups,
--- plus the always-alive constant elements), builds a draggable proxy box per
--- node in its own scenegraph, and re-applies saved positions to the real
--- elements. While mod.is_customizing the "hud_customizer" visibility group
--- wins and only this element draws: proxy boxes, an optional element-list
--- panel, a snapping grid and a help bar.
+-- UIHud gates update() and draw() by the active visibility group, so this
+-- element only runs while mod.is_customizing makes the "hud_customizer" group
+-- win. On its first update() (= first time the editor opens in this HUD's
+-- lifetime) it enumerates every top-level scenegraph node of every HUD element
+-- (mission/hub elements via the parent UIHud's visibility groups, plus the
+-- always-alive constant elements) and builds a draggable proxy box per node in
+-- its own scenegraph: proxy boxes, an optional element-list panel, a snapping
+-- grid and a help bar. Saved positions are applied to the real elements by the
+-- bootstrap's UIHud.init hook at HUD creation, and again on editor close.
 --
 -- Coordinate model: all stored positions are top-left-anchored 1920x1080
 -- virtual UI units. Saved positions are written to real elements with
@@ -242,6 +244,8 @@ local function _safe_draw_text(ui_renderer, text, font_size, position, size, col
         function() UIRenderer.draw_text(ui_renderer, text, FONT_TYPE, font_size, position, size, color) end,
         function() UIRenderer.draw_text(ui_renderer, text, font_size, FONT_TYPE, position, size, color, options) end,
         function() UIRenderer.draw_text(ui_renderer, text, font_size, FONT_TYPE, position, size, color) end,
+        function() UIRenderer.draw_text(ui_renderer, text, nil, font_size, FONT_TYPE, position, size, color, options) end,
+        function() UIRenderer.draw_text(ui_renderer, text, nil, font_size, FONT_TYPE, position, size, color) end,
     }
 
     if _draw_text_variant then
@@ -881,6 +885,28 @@ end
 -- is disabled, and by reset_node).
 function HudElementCustomizer:restore_node_defaults(node_name)
     local pristine = self._pristine[node_name]
+
+    if not pristine then
+        -- _pristine is only built when the editor is first opened; if it never
+        -- was this session, fall back to the persisted snapshot (saved offsets
+        -- still got applied at HUD creation, so restoring must work here too).
+        local settings = self._saved_node_settings[node_name]
+        local defaults = settings and settings.default_settings
+        if defaults and defaults.position and defaults.size then
+            pristine = {
+                position = {
+                    tonumber(defaults.position[1]) or 0,
+                    tonumber(defaults.position[2]) or 0,
+                    tonumber(defaults.position[3]) or 0,
+                },
+                size = {
+                    tonumber(defaults.size[1]) or 25,
+                    tonumber(defaults.size[2]) or 25,
+                },
+            }
+        end
+    end
+
     if not pristine then
         return false
     end
@@ -1325,9 +1351,10 @@ function HudElementCustomizer:update(dt, t, ui_renderer, render_settings, input_
             return
         end
 
-        -- First tick after every HUD creation: enumerate everything and
-        -- re-apply saved settings (visibility groups gate drawing only, so
-        -- this runs even while the editor is "closed").
+        -- UIHud gates update() by visibility group, so this first tick only
+        -- happens when the editor is opened for the first time in this HUD's
+        -- lifetime. Saved settings were already applied by the bootstrap's
+        -- UIHud.init hook; here we enumerate nodes and build the proxy boxes.
         self:_setup_elements(render_settings)
         HudElementCustomizer.super.update(self, dt, t, ui_renderer, render_settings, input_service)
         return

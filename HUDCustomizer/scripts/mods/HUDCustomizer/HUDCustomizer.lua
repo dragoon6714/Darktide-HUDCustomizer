@@ -4,9 +4,10 @@
 -- UIHud.init hook, together with two custom visibility groups:
 --   [1] "hud_customizer" — wins while mod.is_customizing; only the editor draws
 --   [2] "hide_hud"       — wins while mod.is_hud_hidden; nothing draws
--- Visibility groups gate drawing only; the editor element's update() keeps
--- running while "closed", which is how saved positions get re-applied after
--- every HUD creation.
+-- Visibility groups gate BOTH update() and draw() (ui_hud.lua gates each on
+-- currently_visible_elements), so the editor element runs only while open.
+-- Saved positions are therefore re-applied from the UIHud.init hook below,
+-- right after every HUD creation — never from the editor's update().
 
 local mod = get_mod("HUDCustomizer")
 
@@ -69,7 +70,15 @@ mod:hook("UIHud", "init", function(func, self, elements, visibility_groups, para
         end,
     })
 
-    return func(self, elements, visibility_groups, params)
+    func(self, elements, visibility_groups, params)
+
+    -- All elements (and their scenegraphs) exist now. Re-apply the saved
+    -- layout immediately: the editor element only update()s while the editor
+    -- is open, so this hook is the one reliable per-HUD-creation moment.
+    local customizer = self:element(CUSTOMIZER_CLASS_NAME)
+    if customizer and customizer._apply_saved_node_settings then
+        pcall(customizer._apply_saved_node_settings, customizer)
+    end
 end)
 
 -- ============================================================================
@@ -120,9 +129,15 @@ local function recreate_hud()
     ui_manager:create_player_hud(peer_id, local_player_id, elements, visibility_groups)
 end
 
-local function get_live_customizer()
+-- UIManager has no get_hud() method (only the _hud field) — accessing it as a
+-- method is an error. The reference mods read the field directly too.
+local function get_hud()
     local ui_manager = Managers.ui
-    local hud = ui_manager and ui_manager:get_hud()
+    return ui_manager and ui_manager._hud
+end
+
+local function get_live_customizer()
+    local hud = get_hud()
     return hud and hud:element(CUSTOMIZER_CLASS_NAME)
 end
 
@@ -176,8 +191,7 @@ end)
 
 function mod.toggle_hud_editor()
     if not mod.is_customizing then
-        local ui_manager = Managers.ui
-        local hud = ui_manager and ui_manager:get_hud()
+        local hud = get_hud()
 
         if not hud or not hud:element(CUSTOMIZER_CLASS_NAME) then
             mod:notify(mod:localize("notify_no_hud"))
@@ -185,10 +199,15 @@ function mod.toggle_hud_editor()
         end
 
         -- Refuse to open while a view (esc menu, inventory, ...) owns input.
-        local view_handler = ui_manager._view_handler
+        local view_handler = Managers.ui._view_handler
         if view_handler and view_handler:using_input() then
             return
         end
+
+        -- A latched screenshot-mode state would win over the editor group's
+        -- own element and show nothing — the editor key always yields the
+        -- editor.
+        mod.is_hud_hidden = false
     end
 
     mod.is_customizing = not mod.is_customizing
@@ -196,6 +215,11 @@ end
 
 function mod.toggle_hud_visibility()
     mod.is_hud_hidden = not mod.is_hud_hidden
+
+    -- Hiding everything with no feedback reads as a broken mod; say so.
+    if mod.is_hud_hidden then
+        mod:notify(mod:localize("notify_hud_hidden"))
+    end
 end
 
 -- ============================================================================
