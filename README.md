@@ -1,6 +1,6 @@
 # HUD Customizer
 
-A Warhammer 40,000: Darktide mod that lets you reposition, resize, and hide **any** HUD element with an in-game drag-and-drop editor. Press a keybind, and every UI element on your screen gets a draggable proxy box plus a scrollable list panel. Changes apply live and persist across missions, sessions, and game restarts.
+A Warhammer 40,000: Darktide mod that lets you reposition HUD elements with an in-game drag-and-drop editor. Press a keybind, click any highlighted element box, and drag it where you want it. Changes apply live and persist across missions, sessions, and game restarts.
 
 ## Requirements
 
@@ -19,38 +19,24 @@ Enter the hub or a mission (the Psykhanium is a good safe place to experiment), 
 
 | Action | Input |
 |---|---|
-| Select an element | Left-click its box (or its row in the list panel) |
+| Select an element | Left-click its box |
 | Move | Drag with left mouse button |
-| Nudge | Arrow keys (hold **Shift** for ×5) |
-| Resize | **Alt** + arrow keys, or scroll wheel (uniform scale) |
-| Hide / show | Right-click (box or panel row) |
-| Reset one element | Double-click its box |
-| Invert snapping temporarily | Hold **Ctrl** while dragging |
-| Move the list panel | Drag its header |
-| Scroll the list panel | Mouse wheel over the panel |
+| Deselect | Left-click empty space |
 | Close the editor | Press the keybind again (opening any menu also closes it) |
 
-Reset **everything** with the chat command `/hudcustomizer_reset`.
+Reset **everything** to the stock layout with the chat command `/hudcustomizer_reset`.
 
-A separate **Toggle HUD Visibility** keybind hides the entire HUD (screenshot mode).
-
-### Options
-
-- **Grid Snapping** + **Grid Size** — snap dragged elements to a grid (drawn while dragging).
-- **Snap To Other Elements** — magnetic edge/center alignment against other elements.
-- **Show Element List Panel** — the scrollable list of every detected element.
+Positions are stored locally in Darktide's own `user_settings.config` (via DMF), so they work offline and survive game restarts.
 
 ## FAQ
 
-**Some elements have no box.** A few elements are deliberately excluded because moving them breaks them: the crosshair, damage indicators, world markers/tagging, interaction prompts, the emote wheel, and popups.
+**Some elements have no box.** A few elements are deliberately excluded because moving them breaks them: the crosshair, damage indicators, world markers/tagging, interaction prompts, the emote wheel, and prologue tutorial popups.
 
-**My positions reset after a game patch.** Expected when Fatshark renames internal HUD nodes — stale entries are pruned automatically so nothing crashes. Re-position the affected elements.
-
-**Hiding one part of an element hid all of it.** Hiding works per-element, not per-node, in this version.
-
-**A hidden element still shows for a moment.** A handful of elements draw outside the standard pipeline; report these on the mod page.
+**My positions reset after a game patch.** Expected when Fatshark renames internal HUD nodes — stale entries are pruned automatically (with a log line) so nothing crashes. Re-position the affected elements.
 
 **Everything back to stock?** `/hudcustomizer_reset`, or disable the mod in Mod Options (your saved layout is kept and re-applies when re-enabled).
+
+**Does it work in missions and the hub?** Yes — offsets re-apply on every HUD build: game load, hub ↔ mission transitions, and mod reloads. (Spectating uses a separate HUD that DMF cannot inject mod elements into; it shows stock positions while you spectate.)
 
 ## Credits
 
