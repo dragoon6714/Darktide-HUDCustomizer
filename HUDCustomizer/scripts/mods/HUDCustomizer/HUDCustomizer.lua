@@ -49,6 +49,19 @@ local function split_key(key)
     return element_name, node_name
 end
 
+-- HUD elements live on the UIHud; chat/notifications/subtitles live in the
+-- constant-elements manager. Look in both.
+local function find_element(hud, element_name)
+    local element = hud and hud:element(element_name)
+    if element then
+        return element
+    end
+
+    local ui_manager = Managers.ui
+    local constant_elements = ui_manager and ui_manager:ui_constant_elements()
+    return constant_elements and constant_elements:element(element_name)
+end
+
 -- ############################################################################
 -- Applying offsets (every call into a foreign element is pcall'd: game patches
 -- can change signatures, and a moved node must never crash the mod)
@@ -86,7 +99,7 @@ function mod._apply_all_offsets()
             -- Prune only when the element exists here but the node is gone for
             -- good; entries for other contexts are kept.
             local element_name, node_name = split_key(key)
-            local element = element_name and hud:element(element_name)
+            local element = element_name and find_element(hud, element_name)
             if element and type(element._ui_scenegraph) == "table"
                 and rawget(element._ui_scenegraph, node_name) == nil then
                 nodes[key] = nil

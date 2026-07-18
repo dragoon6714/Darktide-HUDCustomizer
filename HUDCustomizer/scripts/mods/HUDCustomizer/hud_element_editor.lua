@@ -14,7 +14,7 @@ local COLOR_BORDER_HOVERED = { 255, 255, 255, 128 }
 local COLOR_BORDER_SELECTED = { 255, 226, 199, 126 }
 local COLOR_FILL = { 40, 255, 255, 255 }
 
-local MIN_PROXY_SIZE = 8 -- editor-virtual units, keeps zero-size nodes clickable
+local MIN_PROXY_SIZE = 24 -- editor-virtual units, keeps zero-size nodes visible and clickable
 
 -- Elements that break (or must not break) when moved. Seeded from Custom HUD,
 -- proven in production; constant elements are out of MVP scope.
@@ -28,6 +28,9 @@ local EXCLUDED_ELEMENTS = {
     HudElementDamageIndicator = true,
     HudElementPrologueTutorialInfoBox = true,
     HudElementPrologueTutorialSequenceTransitionEnd = true,
+    ConstantElementWatermark = true,
+    ConstantElementPopupHandler = true,
+    ConstantElementSoftwareCursor = true,
 }
 
 local EXCLUDED_NODES = {
@@ -74,6 +77,19 @@ end
 -- Discovery (once per HUD build)
 -- ############################################################################
 
+-- "HudElementTeamPanelHandler"/"player_1" -> "Team Panel Handler - player_1"
+-- (node name only when the element has more than one box).
+local function display_name(element_name, node_name, with_node_name)
+    local short = element_name:gsub("^HudElement", ""):gsub("^ConstantElement", "")
+    short = short:gsub("(%l)(%u)", "%1 %2")
+
+    if with_node_name then
+        return short .. " - " .. node_name
+    end
+
+    return short
+end
+
 function HudElementHudCustomizer:_build_definitions(hud)
     local nodes = {}
     mod._nodes = nodes
@@ -89,40 +105,31 @@ function HudElementHudCustomizer:_build_definitions(hud)
     local elements_array = hud._elements_array
 
     for i = 1, #elements_array do
-        local element = elements_array[i]
-        local element_name = element.__class_name
+        self:_register_element_nodes(definitions, nodes, elements_array[i], hud_scale_lookup)
+    end
 
-        if not EXCLUDED_ELEMENTS[element_name] then
-            local ui_scenegraph = element._ui_scenegraph
-            local hierarchical_scenegraph = ui_scenegraph and ui_scenegraph.hierarchical_scenegraph
+    -- Constant elements (chat, notification feed, subtitles, ...) live in their
+    -- own manager, not the HUD; only the always-on "default" group is offered.
+    local constant_elements = Managers.ui:ui_constant_elements()
 
-            if hierarchical_scenegraph then
-                local element_definitions = element._definitions
-                local scenegraph_definition = element_definitions and element_definitions.scenegraph_definition
-                local excluded_nodes = EXCLUDED_NODES[element_name]
+    if constant_elements then
+        local visible_elements = nil
 
-                -- One movable node per top-level child of each root node
-                -- (Custom HUD's proven discovery path).
-                for j = 1, #hierarchical_scenegraph do
-                    local children = hierarchical_scenegraph[j].children
+        for _, group in ipairs(constant_elements._visibility_groups or {}) do
+            if group.name == "default" then
+                visible_elements = group.visible_elements
+                break
+            end
+        end
 
-                    for k = 1, children and #children or 0 do
-                        local child = children[k]
-                        local child_name = child.name
+        local constant_array = constant_elements._elements_array or {}
+        local constant_scale_lookup = constant_elements._elements_hud_scale_lookup or {}
 
-                        if child_name and not (excluded_nodes and excluded_nodes[child_name]) then
-                            local key = element_name .. "|" .. child_name
+        for i = 1, #constant_array do
+            local element = constant_array[i]
 
-                            if not nodes[key] then
-                                nodes[key] = self:_make_registry_entry(element, element_name, child,
-                                    scenegraph_definition and scenegraph_definition[child_name],
-                                    hud_scale_lookup[element_name] == true,
-                                    mod._layout.nodes[key])
-                                self:_make_proxy(definitions, key)
-                            end
-                        end
-                    end
-                end
+            if not visible_elements or visible_elements[element.__class_name] then
+                self:_register_element_nodes(definitions, nodes, element, constant_scale_lookup)
             end
         end
     end
@@ -130,9 +137,69 @@ function HudElementHudCustomizer:_build_definitions(hud)
     return definitions
 end
 
+function HudElementHudCustomizer:_register_element_nodes(definitions, nodes, element, hud_scale_lookup)
+    local element_name = element.__class_name
+
+    if EXCLUDED_ELEMENTS[element_name] then
+        return
+    end
+
+    local ui_scenegraph = element._ui_scenegraph
+    local hierarchical_scenegraph = ui_scenegraph and ui_scenegraph.hierarchical_scenegraph
+
+    if not hierarchical_scenegraph then
+        return
+    end
+
+    local element_definitions = element._definitions
+    local scenegraph_definition = element_definitions and element_definitions.scenegraph_definition
+    local excluded_nodes = EXCLUDED_NODES[element_name]
+
+    -- One movable node per top-level child of each root node
+    -- (Custom HUD's proven discovery path).
+    local eligible = {}
+
+    for j = 1, #hierarchical_scenegraph do
+        local children = hierarchical_scenegraph[j].children
+
+        for k = 1, children and #children or 0 do
+            local child = children[k]
+            local child_name = child.name
+
+            if child_name and not (excluded_nodes and excluded_nodes[child_name])
+                and not nodes[element_name .. "|" .. child_name] then
+                eligible[#eligible + 1] = child
+            end
+        end
+    end
+
+    local uses_hud_scale = hud_scale_lookup[element_name] == true
+    local several = #eligible > 1
+
+    for i = 1, #eligible do
+        local child = eligible[i]
+        local key = element_name .. "|" .. child.name
+
+        nodes[key] = self:_make_registry_entry(element, element_name, child,
+            scenegraph_definition and scenegraph_definition[child.name],
+            uses_hud_scale,
+            mod._layout.nodes[key])
+        self:_make_proxy(definitions, key, display_name(element_name, child.name, several))
+    end
+end
+
 -- Snapshots the node's default position/alignments (authored definition first,
 -- live node as fallback) for delta math and reset.
 function HudElementHudCustomizer:_make_registry_entry(element, element_name, child, definition_node, uses_hud_scale, saved_offset)
+    -- set_scenegraph_position writes through node.position, but a node authored
+    -- without a position only gets local_position at scenegraph init: every
+    -- write would error (and the pcall would swallow it, leaving the node
+    -- silently unmovable). Alias the same table once so writes reach the
+    -- scenegraph updater.
+    if not child.position then
+        child.position = child.local_position
+    end
+
     local default_position = definition_node and definition_node.position
     local offset_x, offset_y = 0, 0
 
@@ -169,8 +236,9 @@ end
 
 -- One scenegraph node (parented to "screen": position == virtual world position)
 -- plus one widget per movable node. Two rect passes fake a bordered box: a
--- full-size border rect with an inset fill rect on top.
-function HudElementHudCustomizer:_make_proxy(definitions, key)
+-- full-size border rect with an inset fill rect on top; a text pass names the
+-- element on the box.
+function HudElementHudCustomizer:_make_proxy(definitions, key, label)
     definitions.scenegraph_definition[key] = {
         parent = "screen",
         position = { 0, 0, 0 },
@@ -195,6 +263,23 @@ function HudElementHudCustomizer:_make_proxy(definitions, key)
                 color = COLOR_FILL,
                 offset = { 2, 2, 2 },
                 size = { MIN_PROXY_SIZE - 4, MIN_PROXY_SIZE - 4 },
+            },
+        },
+        {
+            pass_type = "text",
+            value = label,
+            value_id = "label",
+            style_id = "label",
+            style = {
+                -- Fixed wide size: the label must not wrap inside narrow boxes.
+                size = { 500, 20 },
+                font_size = 14,
+                font_type = "proxima_nova_bold",
+                text_horizontal_alignment = "left",
+                text_vertical_alignment = "top",
+                text_color = { 255, 255, 255, 255 },
+                drop_shadow = true,
+                offset = { 3, 2, 3 },
             },
         },
     }, key)
